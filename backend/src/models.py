@@ -17,6 +17,9 @@ class Consignment(Base):
 class VaseSample(Base):
     __tablename__='vase_samples'
     id=Column(Integer,primary_key=True);consignment_id=Column(Integer,ForeignKey('consignments.id'),nullable=False);code=Column(String(60),unique=True,nullable=False);maturity=Column(Float,nullable=False);stem_cm=Column(Float,nullable=False);cold_hours=Column(Float,nullable=False);observed_days=Column(Float,nullable=True);state=Column(String(20),default=SAMPLE_STATES[0]);prediction=Column(JSON);error=Column(String(450));approved_grade=Column(String(2));review_note=Column(String(250))
+class LifeApproval(Base):
+    __tablename__='life_approvals'
+    id=Column(Integer,primary_key=True);sample_id=Column(Integer,ForeignKey('vase_samples.id'),nullable=False);supervisor_email=Column(String(100),nullable=False);note=Column(String(250),nullable=False);pair_count=Column(Integer,nullable=False);lower_bound_days=Column(Float,nullable=True);basis_hash=Column(String(64),nullable=False);approved_grade=Column(String(2),nullable=False);at=Column(String(20),nullable=False)
 class AuctionSession(Base):
     __tablename__='auction_sessions'
     id=Column(Integer,primary_key=True);code=Column(String(60),unique=True,nullable=False);opens_at=Column(String(20),nullable=False);closes_at=Column(String(20),nullable=False)

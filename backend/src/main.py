@@ -11,7 +11,7 @@ from .schemas import *
 from .common import lock,pack,add,audit,stamp
 from .auth import current,writer,supervisor,verify,token
 from .middleware import Trace,Burst
-from . import auction_service as auction,dispute_service as dispute
+from . import auction_service as auction,dispute_service as dispute,lifetime_guard as guard
 q=redis.Redis.from_url(os.environ['REDIS_URL'],decode_responses=True)
 @asynccontextmanager
 async def lifespan(app):
@@ -35,7 +35,7 @@ def login(d:Login,s=Depends(session)):
 def me(u=Depends(current)):return {'email':u.email,'role':u.role}
 @app.get('/archive')
 def archive(s=Depends(session),u=Depends(current)):
-    return {m.__tablename__:[pack(x)for x in s.scalars(select(m).order_by(m.id))]for m in (Clock,Consignment,VaseSample,AuctionSession,AuctionLot,Bid,Deal,Dispute,Settlement)}
+    return {m.__tablename__:[pack(x)for x in s.scalars(select(m).order_by(m.id))]for m in (Clock,Consignment,VaseSample,AuctionSession,AuctionLot,Bid,Deal,Dispute,Settlement,LifeApproval)}
 @app.get('/audits')
 def audits(s=Depends(session),u=Depends(current)):return [pack(x)for x in s.scalars(select(Audit).order_by(Audit.id.desc()).limit(50))]
 @app.post('/consignments')
@@ -67,9 +67,21 @@ def grade(id:int,d:GradeInput,s=Depends(session),u=Depends(supervisor)):
     x.approved_grade=d.grade;x.review_note=d.note;x.state='approved';audit(s,u,'主管核定等级 '+d.grade);s.commit();return pack(x)
 @app.put('/samples/{id}/observation')
 def observation(id:int,d:ObservationInput,s=Depends(session),u=Depends(writer)):
+    pre=s.get(VaseSample,id)
+    if not pre:raise HTTPException(404,'留样不存在')
+    cons=s.get(Consignment,pre.consignment_id)
+    guard.lock_variety(s,cons.variety)  # 封存与挂场按品种串行：新封存即时重算下界并使旧签字失效
     x=lock(s,VaseSample,id)
     if x.observed_days is not None:raise HTTPException(409,'瓶插终点观察已封存，不可覆盖争议证据')
     x.observed_days=d.observed_days;audit(s,u,'封存实际瓶插观察');s.commit();return pack(x)
+@app.get('/samples/{id}/life-guard')
+def life_guard(id:int,s=Depends(session),u=Depends(current)):
+    x=s.get(VaseSample,id)
+    if not x:raise HTTPException(404,'留样不存在')
+    return guard.build_guard(s,x)
+@app.post('/samples/{id}/life-approval')
+def life_approval(id:int,d:LifeApprovalInput,s=Depends(session),u=Depends(supervisor)):
+    x=guard.sign(s,id,d,u);s.commit();return x
 @app.post('/sessions')
 def session_new(d:SessionInput,s=Depends(session),u=Depends(supervisor)):
     x=auction.session_create(s,d,u);s.commit();return x
